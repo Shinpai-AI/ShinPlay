@@ -278,9 +278,13 @@ def download_song(info, output_dir):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode == 0:
             return "OK", str(song_file)
-        return f"ERROR", None
+        return f"ERROR: {result.stderr[:300]}", None
+    except FileNotFoundError:
+        return "ERROR: yt-dlp nicht gefunden! Bitte installieren: pip install yt-dlp", None
+    except subprocess.TimeoutExpired:
+        return "ERROR: Timeout (120s)", None
     except Exception as e:
-        return f"ERROR", None
+        return f"ERROR: {e}", None
 
 
 class ShinPlayApp:
@@ -509,8 +513,8 @@ class ShinPlayApp:
                                 self.root.after(0, lambda: self.status_label.configure(
                                     text="🔴 Aufnahme läuft...", fg=FG_GREEN))
                             else:
-                                self.root.after(0, lambda s=song_id:
-                                    self._log(f"❌ {s} — Fehler", "error"))
+                                self.root.after(0, lambda s=song_id, r=result:
+                                    self._log(f"❌ {s} — {r}", "error"))
                                 self.root.after(0, lambda: self.status_label.configure(
                                     text="🔴 Aufnahme läuft...", fg=FG_GREEN))
 
@@ -864,6 +868,26 @@ if __name__ == "__main__":
                     f"App startet trotzdem im Portable-Modus!"
                 )
                 root.destroy()
+
+    # Dependency Check
+    missing = []
+    if not shutil.which("yt-dlp"):
+        missing.append("yt-dlp (pip install yt-dlp)")
+    if not shutil.which("ffmpeg"):
+        missing.append("ffmpeg (https://ffmpeg.org)")
+
+    if missing:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showwarning(
+            "ShinPlay — Fehlende Programme",
+            f"⚠️ Folgende Programme fehlen:\n\n"
+            + "\n".join(f"❌ {m}" for m in missing)
+            + "\n\nBitte installieren, sonst können keine Songs geladen werden!\n\n"
+            + ("Windows: Öffne CMD und tippe:\n  pip install yt-dlp\n\n" if IS_WINDOWS else "")
+            + "ShinPlay startet trotzdem — Downloads funktionieren erst nach Installation."
+        )
+        root.destroy()
 
     app = ShinPlayApp()
     app.run()
