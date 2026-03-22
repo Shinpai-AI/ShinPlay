@@ -632,7 +632,13 @@ def show_install_dialog():
     dialog.configure(bg=BG_DARK)
     dialog.resizable(False, False)
 
-    result = {"install": False, "path": str(Path.home() / ".local" / "share" / "shinplay")}
+    if IS_WINDOWS:
+        default_install = str(Path.home() / "AppData" / "Local" / "ShinPlay")
+    elif IS_MAC:
+        default_install = str(Path.home() / "Applications" / "ShinPlay")
+    else:
+        default_install = str(Path.home() / ".local" / "share" / "shinplay")
+    result = {"install": False, "path": default_install}
 
     # Header
     tk.Label(dialog, text="🎵 Willkommen bei ShinPlay!", font=("Helvetica", 16, "bold"),
@@ -693,67 +699,110 @@ def show_install_dialog():
     return result
 
 
-if __name__ == "__main__":
-    setup_marker = Path.home() / ".config" / "shinplay" / ".installed"
+def install_windows(install_dir, exe_path):
+    """Windows-spezifische Installation — Startmenü-Verknüpfung."""
+    install_dir = Path(install_dir)
+    install_dir.mkdir(parents=True, exist_ok=True)
 
-    if not setup_marker.exists():
-        # Erster Start — fragen ob installieren
-        result = show_install_dialog()
+    # EXE kopieren
+    dest = install_dir / "ShinPlay.exe"
+    shutil.copy2(str(exe_path), str(dest))
 
-        if result["install"]:
-            custom_path = result["path"]
-            app_path = Path(__file__).resolve()
+    # Assets kopieren
+    bundle_dir = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else exe_path.parent
+    assets_src = bundle_dir / "assets"
+    assets_dst = install_dir / "assets"
+    if assets_src.exists():
+        if assets_dst.exists():
+            shutil.rmtree(str(assets_dst))
+        shutil.copytree(str(assets_src), str(assets_dst))
 
-            # Direkt installieren mit custom path
-            install_dir = Path(custom_path)
-            bin_dir = Path.home() / ".local" / "bin"
-            desktop_dir = Path.home() / ".local" / "share" / "applications"
-            icon_dir = Path.home() / ".local" / "share" / "icons" / "hicolor" / "512x512" / "apps"
+    # Startmenü-Verknüpfung
+    try:
+        import winreg
+        startmenu = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+        startmenu.mkdir(parents=True, exist_ok=True)
 
-            install_dir.mkdir(parents=True, exist_ok=True)
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            desktop_dir.mkdir(parents=True, exist_ok=True)
-            icon_dir.mkdir(parents=True, exist_ok=True)
+        # VBS Script um Shortcut zu erstellen (Windows hat kein natives Python-API dafür)
+        vbs = install_dir / "_create_shortcut.vbs"
+        vbs.write_text(f'''Set WshShell = CreateObject("WScript.Shell")
+Set shortcut = WshShell.CreateShortcut("{startmenu}\\ShinPlay.lnk")
+shortcut.TargetPath = "{dest}"
+shortcut.WorkingDirectory = "{install_dir}"
+shortcut.IconLocation = "{dest}"
+shortcut.Description = "Spotify Song Downloader by Shinpai-AI"
+shortcut.Save
+''')
+        subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, timeout=10)
+        vbs.unlink(missing_ok=True)
+    except Exception:
+        pass
 
-            is_frozen = getattr(sys, 'frozen', False)
-            if is_frozen:
-                exe_path = Path(sys.executable).resolve()
-                dest = install_dir / "ShinPlay"
-                shutil.copy2(str(exe_path), str(dest))
-                dest.chmod(0o755)
-                exec_cmd = str(dest)
-                bundle_dir = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else exe_path.parent
-                assets_src = bundle_dir / "assets"
-                assets_dst = install_dir / "assets"
-                if assets_src.exists():
-                    if assets_dst.exists():
-                        shutil.rmtree(str(assets_dst))
-                    shutil.copytree(str(assets_src), str(assets_dst))
-            else:
-                for f in app_path.parent.iterdir():
-                    if f.name.startswith('.') or f.name in ('build', 'dist', '__pycache__'):
-                        continue
-                    if f.is_dir():
-                        dest_sub = install_dir / f.name
-                        if dest_sub.exists():
-                            shutil.rmtree(str(dest_sub))
-                        shutil.copytree(str(f), str(dest_sub))
-                    elif f.is_file():
-                        shutil.copy2(str(f), str(install_dir / f.name))
-                exec_cmd = f"/usr/bin/python3 {install_dir}/shinplay-gui.py"
+    # Desktop-Verknüpfung
+    try:
+        desktop = Path.home() / "Desktop"
+        vbs = install_dir / "_create_desktop.vbs"
+        vbs.write_text(f'''Set WshShell = CreateObject("WScript.Shell")
+Set shortcut = WshShell.CreateShortcut("{desktop}\\ShinPlay.lnk")
+shortcut.TargetPath = "{dest}"
+shortcut.WorkingDirectory = "{install_dir}"
+shortcut.IconLocation = "{dest}"
+shortcut.Description = "Spotify Song Downloader by Shinpai-AI"
+shortcut.Save
+''')
+        subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, timeout=10)
+        vbs.unlink(missing_ok=True)
+    except Exception:
+        pass
 
-            icon_src = install_dir / "assets" / "icon.png"
-            if not icon_src.exists() and (app_path.parent / "assets" / "icon.png").exists():
-                (install_dir / "assets").mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(app_path.parent / "assets" / "icon.png"), str(icon_src))
-            if icon_src.exists():
-                shutil.copy2(str(icon_src), str(icon_dir / "shinplay.png"))
+    return True
 
-            desktop_file = desktop_dir / "shinplay.desktop"
-            desktop_file.write_text(f"""[Desktop Entry]
+
+def install_linux(install_dir, exe_path):
+    """Linux-spezifische Installation."""
+    install_dir = Path(install_dir)
+    bin_dir = Path.home() / ".local" / "bin"
+    desktop_dir = Path.home() / ".local" / "share" / "applications"
+    icon_dir = Path.home() / ".local" / "share" / "icons" / "hicolor" / "512x512" / "apps"
+
+    for d in [install_dir, bin_dir, desktop_dir, icon_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    is_frozen = getattr(sys, 'frozen', False)
+    if is_frozen:
+        dest = install_dir / "ShinPlay"
+        shutil.copy2(str(exe_path), str(dest))
+        dest.chmod(0o755)
+        exec_cmd = str(dest)
+        bundle_dir = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else exe_path.parent
+        assets_src = bundle_dir / "assets"
+        assets_dst = install_dir / "assets"
+        if assets_src.exists():
+            if assets_dst.exists():
+                shutil.rmtree(str(assets_dst))
+            shutil.copytree(str(assets_src), str(assets_dst))
+    else:
+        for f in exe_path.parent.iterdir():
+            if f.name.startswith('.') or f.name in ('build', 'dist', '__pycache__'):
+                continue
+            if f.is_dir():
+                dest_sub = install_dir / f.name
+                if dest_sub.exists():
+                    shutil.rmtree(str(dest_sub))
+                shutil.copytree(str(f), str(dest_sub))
+            elif f.is_file():
+                shutil.copy2(str(f), str(install_dir / f.name))
+        exec_cmd = f"/usr/bin/python3 {install_dir}/shinplay-gui.py"
+
+    icon_src = install_dir / "assets" / "icon.png"
+    if icon_src.exists():
+        shutil.copy2(str(icon_src), str(icon_dir / "shinplay.png"))
+
+    desktop_file = desktop_dir / "shinplay.desktop"
+    desktop_file.write_text(f"""[Desktop Entry]
 Name=ShinPlay
 GenericName=Spotify Song Downloader
-Comment=Lädt automatisch Songs die bei Spotify laufen — by Shinpai-AI
+Comment=Spotify Song Downloader by Shinpai-AI
 Exec={exec_cmd}
 Icon={icon_dir}/shinplay.png
 Terminal=false
@@ -762,31 +811,57 @@ Categories=AudioVideo;Music;Audio;
 Keywords=spotify;download;music;mp3;shinplay;
 StartupNotify=false
 """)
-            desktop_file.chmod(0o755)
+    desktop_file.chmod(0o755)
 
-            launcher = bin_dir / "shinplay"
-            launcher.write_text(f"""#!/bin/bash
+    launcher = bin_dir / "shinplay"
+    launcher.write_text(f"""#!/bin/bash
 export PATH="$HOME/.deno/bin:$HOME/.local/bin:$PATH"
 nohup {exec_cmd} "$@" &>/dev/null &
 """)
-            launcher.chmod(0o755)
+    launcher.chmod(0o755)
+    subprocess.run(["update-desktop-database", str(desktop_dir)], capture_output=True, timeout=5)
+    return True
 
-            subprocess.run(["update-desktop-database", str(desktop_dir)], capture_output=True, timeout=5)
-            success = True
-            if success:
-                setup_marker.parent.mkdir(parents=True, exist_ok=True)
-                setup_marker.touch()
-                # Pfad merken für Deinstallation
-                (setup_marker.parent / "install_path").write_text(str(custom_path))
+
+if __name__ == "__main__":
+    setup_marker = CONFIG_DIR / ".installed"
+
+    if not setup_marker.exists():
+        result = show_install_dialog()
+
+        if result["install"]:
+            custom_path = result["path"]
+            exe_path = Path(sys.executable).resolve() if getattr(sys, 'frozen', False) else Path(__file__).resolve()
+
+            try:
+                if IS_WINDOWS:
+                    success = install_windows(custom_path, exe_path)
+                elif IS_MAC:
+                    success = install_linux(custom_path, exe_path)  # macOS ähnlich wie Linux
+                else:
+                    success = install_linux(custom_path, exe_path)
+
+                if success:
+                    setup_marker.parent.mkdir(parents=True, exist_ok=True)
+                    setup_marker.touch()
+                    (setup_marker.parent / "install_path").write_text(str(custom_path))
+                    root = tk.Tk()
+                    root.withdraw()
+                    messagebox.showinfo(
+                        "ShinPlay — Installiert!",
+                        f"✅ ShinPlay wurde installiert!\n\n"
+                        f"📍 Installiert in: {custom_path}\n"
+                        f"🖥️ Startmenü: Suche 'ShinPlay'\n\n"
+                        f"Die App startet jetzt!"
+                    )
+                    root.destroy()
+            except Exception as e:
                 root = tk.Tk()
                 root.withdraw()
-                messagebox.showinfo(
-                    "ShinPlay — Installiert!",
-                    f"✅ ShinPlay wurde installiert!\n\n"
-                    f"📍 Installiert in: {custom_path}\n"
-                    f"🖥️ Startmenü: Suche 'ShinPlay'\n"
-                    f"💻 Terminal: shinplay\n\n"
-                    f"Die App startet jetzt!"
+                messagebox.showerror(
+                    "ShinPlay — Fehler",
+                    f"❌ Installation fehlgeschlagen:\n{e}\n\n"
+                    f"App startet trotzdem im Portable-Modus!"
                 )
                 root.destroy()
 
