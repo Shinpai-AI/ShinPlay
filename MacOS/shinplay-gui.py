@@ -52,9 +52,19 @@ def save_config(config):
     except Exception:
         pass
 
-# Deno Path
+# PATH setup — eingebundene Binaries + System
 if IS_LINUX:
     os.environ["PATH"] = os.path.expanduser("~/.deno/bin") + ":" + os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", "")
+
+# PyInstaller Bundle: bundled/ Ordner enthält ffmpeg + yt-dlp
+if getattr(sys, 'frozen', False):
+    _bundle_dir = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
+    _bundled = _bundle_dir / "bundled"
+    if _bundled.exists():
+        if IS_WINDOWS:
+            os.environ["PATH"] = str(_bundled) + ";" + os.environ.get("PATH", "")
+        else:
+            os.environ["PATH"] = str(_bundled) + ":" + os.environ.get("PATH", "")
 
 # === COLORS (Boss-Style) ===
 BG_DARK = "#1a1720"

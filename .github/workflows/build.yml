@@ -87,14 +87,31 @@ jobs:
         run: |
           pip install pyinstaller yt-dlp winsdk
 
+      - name: Download ffmpeg + yt-dlp binaries
+        run: |
+          cd Windows
+          mkdir -p bundled
+          # ffmpeg
+          curl -fsSL -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_extract
+          $ffDir = Get-ChildItem ffmpeg_extract -Directory | Select-Object -First 1
+          Copy-Item "$($ffDir.FullName)\bin\ffmpeg.exe" bundled\ffmpeg.exe
+          Copy-Item "$($ffDir.FullName)\bin\ffprobe.exe" bundled\ffprobe.exe
+          # yt-dlp
+          curl -fsSL -o bundled\yt-dlp.exe https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
+          dir bundled
+        shell: pwsh
+
       - name: Build Windows EXE
         run: |
           cd Windows
           pyinstaller --onefile --windowed --name="ShinPlay" `
             --icon=assets/icon.ico `
             --add-data="assets;assets" `
+            --add-data="bundled;bundled" `
             --hidden-import=tkinter `
             shinplay-gui.py
+        shell: pwsh
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
