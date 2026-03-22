@@ -114,35 +114,27 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyinstaller yt-dlp
+          pip install pyinstaller yt-dlp Pillow
 
       - name: Build macOS App
         run: |
           cd MacOS
-          pyinstaller --onefile --windowed --name="ShinPlay" \
+          pyinstaller --onedir --windowed --name="ShinPlay" \
             --icon=assets/icon.png \
             --add-data="assets:assets" \
             --hidden-import=tkinter \
             shinplay-gui.py
 
-      - name: Create DMG
+      - name: Create ZIP
         run: |
-          mkdir -p dmg_contents
-          cp MacOS/dist/ShinPlay dmg_contents/
-          cp MacOS/assets/icon.png dmg_contents/
-          hdiutil create -volname "ShinPlay" -srcfolder dmg_contents -ov -format UDZO ShinPlay-macOS.dmg || true
-          # Fallback: zip wenn dmg nicht klappt
-          if [ ! -f ShinPlay-macOS.dmg ]; then
-            cd MacOS/dist && zip -r ../../ShinPlay-macOS.zip ShinPlay
-          fi
+          cd MacOS/dist
+          zip -r ../../ShinPlay-macOS.zip ShinPlay.app || zip -r ../../ShinPlay-macOS.zip ShinPlay/
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ShinPlay-macOS
-          path: |
-            ShinPlay-macOS.dmg
-            ShinPlay-macOS.zip
+          path: ShinPlay-macOS.zip
 
   release:
     needs: [build-linux, build-windows, build-macos]
@@ -160,7 +152,7 @@ jobs:
           files: |
             ShinPlay-Linux/ShinPlay-x86_64.AppImage
             ShinPlay-Windows/ShinPlay.exe
-            ShinPlay-macOS/ShinPlay-macOS.*
+            ShinPlay-macOS/ShinPlay-macOS.zip
           body: |
             ## 🎵 Deine Musik. Erkannt. Geladen. Für immer deins.
 
