@@ -1,0 +1,181 @@
+name: Build ShinPlay
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller yt-dlp
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
+
+      - name: Build Linux Binary
+        run: |
+          cd Linux
+          pyinstaller --onefile --windowed --name="ShinPlay" \
+            --icon=assets/icon.png \
+            --add-data="assets:assets" \
+            --hidden-import=tkinter \
+            shinplay-gui.py
+
+      - name: Build AppImage
+        run: |
+          # AppImageTool
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+          # AppDir
+          mkdir -p ShinPlay.AppDir/usr/bin/assets
+          cp Linux/dist/ShinPlay ShinPlay.AppDir/usr/bin/shinplay
+          chmod +x ShinPlay.AppDir/usr/bin/shinplay
+          cp Linux/assets/icon.png ShinPlay.AppDir/usr/bin/assets/
+          cp Linux/assets/icon.png ShinPlay.AppDir/shinplay.png
+          mkdir -p ShinPlay.AppDir/usr/share/icons/hicolor/512x512/apps
+          cp Linux/assets/icon.png ShinPlay.AppDir/usr/share/icons/hicolor/512x512/apps/shinplay.png
+
+          cat > ShinPlay.AppDir/shinplay.desktop << 'EOF'
+          [Desktop Entry]
+          Name=ShinPlay
+          Exec=shinplay
+          Icon=shinplay
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Music;
+          EOF
+
+          cat > ShinPlay.AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export PATH="$HOME/.deno/bin:$HOME/.local/bin:$PATH"
+          exec "$HERE/usr/bin/shinplay" "$@"
+          EOF
+          chmod +x ShinPlay.AppDir/AppRun
+
+          ARCH=x86_64 ./appimagetool ShinPlay.AppDir ShinPlay-x86_64.AppImage
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShinPlay-Linux
+          path: ShinPlay-x86_64.AppImage
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller yt-dlp winsdk
+
+      - name: Build Windows EXE
+        run: |
+          cd Windows
+          pyinstaller --onefile --windowed --name="ShinPlay" `
+            --icon=assets/icon.ico `
+            --add-data="assets;assets" `
+            --hidden-import=tkinter `
+            shinplay-gui.py
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShinPlay-Windows
+          path: Windows/dist/ShinPlay.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller yt-dlp
+
+      - name: Build macOS App
+        run: |
+          cd MacOS
+          pyinstaller --onefile --windowed --name="ShinPlay" \
+            --icon=assets/icon.png \
+            --add-data="assets:assets" \
+            --hidden-import=tkinter \
+            shinplay-gui.py
+
+      - name: Create DMG
+        run: |
+          mkdir -p dmg_contents
+          cp MacOS/dist/ShinPlay dmg_contents/
+          cp MacOS/assets/icon.png dmg_contents/
+          hdiutil create -volname "ShinPlay" -srcfolder dmg_contents -ov -format UDZO ShinPlay-macOS.dmg || true
+          # Fallback: zip wenn dmg nicht klappt
+          if [ ! -f ShinPlay-macOS.dmg ]; then
+            cd MacOS/dist && zip -r ../../ShinPlay-macOS.zip ShinPlay
+          fi
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShinPlay-macOS
+          path: |
+            ShinPlay-macOS.dmg
+            ShinPlay-macOS.zip
+
+  release:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ShinPlay-Linux/ShinPlay-x86_64.AppImage
+            ShinPlay-Windows/ShinPlay.exe
+            ShinPlay-macOS/ShinPlay-macOS.*
+          body: |
+            ## 🎵 Deine Musik. Erkannt. Geladen. Für immer deins.
+
+            ### ⬇️ Downloads
+
+            | Plattform | Datei | Anleitung |
+            |-----------|-------|-----------|
+            | 🐧 Linux | `ShinPlay-x86_64.AppImage` | Doppelklick! |
+            | 🪟 Windows | `ShinPlay.exe` | Doppelklick! (Python + ffmpeg nötig) |
+            | 🍎 macOS | `ShinPlay-macOS.dmg/.zip` | Öffnen + in Applications ziehen |
+
+            ### ✨ Features
+            - Erkennt jeden Player (Spotify, VLC, YouTube, Apple Music)
+            - Automatischer Download + Sortierung
+            - Elegante Dark-Theme GUI
+            - Cross-Platform!
+
+            *Made with conviction, not capital.* 🦋
